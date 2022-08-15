@@ -1,13 +1,116 @@
-Version: 1.0
+###  Shrinkage Methods: Ridge and Lasso.
+# The objective function is SSR + penalty term.
 
-RestoreWorkspace: Default
-SaveWorkspace: Default
-AlwaysSaveHistory: Default
+## Ridge regression
 
-EnableCodeIndexing: Yes
-UseSpacesForTab: Yes
-NumSpacesForTab: 2
-Encoding: UTF-8
+# "glmnet" package needs to be installed for ridge regression and the lasso.  
 
-RnwWeave: Sweave
-LaTeX: pdfLaTeX
+rm(list=ls())
+library(ISLR)
+head(Hitters)
+sum(is.na(Hitters))
+Hitters <- na.omit(Hitters)
+str(Hitters)
+x.temp <- model.matrix(Salary~.,Hitters)        # model.matrix: produces a matrix of regressors.
+                                                # We use glmnet() function for the ridge regression
+                                                # and Lasso. It requires x has the form of matrix.
+                                                # Check this with ?glmnet below
+                                                # The first column is the intercept.
+                                                # automatically transforms any qualitative 
+                                                # variables (factors) into dummy variables.
+head(x.temp)
+x <- x.temp[,-1]
+y <- Hitters$Salary
+
+# install.packages("Rcpp")
+library(Rcpp) 
+
+# install.packages("glmnet")
+library(glmnet)
+
+grid <- 10^seq(10,-2,length=100)               # consider different value of lambda
+plot(grid,type="h")
+
+?glmnet
+ridge.mod <- glmnet(x,y,alpha=0,lambda=grid)   # By default, the glmnet() function standardizes
+                                               # the variables (standardize=TRUE) so that they are on the same scale.
+                                               # Note that the syntax is different from lm() function.
+                                               # alpha=0 -> ridge regression, alpha=1 -> Lasso
+
+dim(coef(ridge.mod))     # Each column includes coefficients of predictors and an intercept for each lambda.
+
+grid[50]
+ridge.mod$lambda[50]
+coef(ridge.mod)[,50]
+sum(coef(ridge.mod)[-1,50]^2)             # Penalty term = lambda*sum of betahat^2
+                                        # Question: Why do we have -1 in the row index?
+
+ridge.mod$lambda[60]
+coef(ridge.mod)[,60]
+sum(coef(ridge.mod)[-1,60]^2) 
+
+predict(ridge.mod, s=5, type="coefficients")[1:20,]  # Approximate ridge regression coefficients with lambda=5. 
+                                                     # s: panelty tuning parameter: lambda=5
+                                                     # ?predict.glmnet
+
+ridge.mod5 <- glmnet(x,y,alpha=0,lambda=5)
+coef(ridge.mod5)
+
+# Comparison of performance between ridge regression and OLS
+set.seed(1)
+train <- sample(1:nrow(x), round(nrow(x)/2))
+y.train <- y[train]
+x.train <- x[train,]
+y.test <- y[-train]
+x.test <- x[-train,]
+
+ridge.mod <- glmnet(x.train,y.train,alpha=0,lambda=grid,thresh=1e-12)  # Default: thresh=1e-7 which determine convergence.
+                                                                       # alpha=0: ridge 
+                                                                       # alpha=1: lasso
+ridge.pred <- predict(ridge.mod,s=4,newx=x.test)
+mean((ridge.pred - y.test)^2)
+
+# We can see whether ridge regression with lambda=4 performs better than the LS.
+
+ridge.pred <- predict(ridge.mod,s=0,newx=x.test,exact=TRUE,x=x.train,y=y.train)  # "exact=TRUE" fits the model again since
+                                                               # lambda=0: equivalent to a linear fit
+                                                               #           was not used with training data.             
+                                                               # "exact=FALSE" is default and uses approximation.
+mean((ridge.pred - y.test)^2)
+
+train.data <- data.frame(y.train,x.train)
+linear.fit <- lm(y.train~., data=train.data)
+newX <- data.frame(x.test)
+linear.pred <- predict(object=linear.fit,newdata=newX)
+mean((linear.pred - y.test)^2)
+
+# Choice of lambda - cross validation
+set.seed(1)
+cv.out <- cv.glmnet(x.train,y.train,nfolds=10,alpha=0)    # default is 10-fold CV and can change this with "nfolds=" 
+plot(cv.out)
+bestlam <- cv.out$lambda.min                    # value of lambda that minimizes the cv error.
+bestlam
+log(bestlam)
+
+ridge.pred <- predict(ridge.mod,s=bestlam,newx=x.test)
+mean((ridge.pred - y.test)^2)
+
+out <- glmnet(x,y,alpha=0,lambda=bestlam)
+coef(out)
+
+## The Lasso
+
+lasso.mod <- glmnet(x.train, y.train, alpha=1, lambda=grid)
+plot(lasso.mod)                                               # change of coefficients over |beta|
+
+set.seed(1)
+cv.out <- cv.glmnet(x.train,y.train,alpha=1)
+plot(cv.out)
+bestlam <- cv.out$lambda.min
+bestlam
+lasso.pred <- predict(lasso.mod,s=bestlam,newx=x.test)
+mean((lasso.pred-y.test)^2)
+
+out <- glmnet(x,y,alpha=1,lambda=bestlam)
+coef(out)                           # Sparsity: We can see that many lasso coefficients are exactly zero.
+
